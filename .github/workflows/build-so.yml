@@ -31,21 +31,21 @@ jobs:
         run: |
           pip3 install Pillow --break-system-packages
 
-      - name: Baixar Rootfs Base do Ubuntu Touch ARM64
+      - name: Baixar Rootfs Base Ubuntu 20.04 ARM64
         run: |
-          # URL ESTÁVEL do CDN oficial do UBports (Focal 20.04 Core ARM64)
-          ROOTFS_URL="https://cdimage.ubports.com/rootfs/20240520/ubports-touch.rootfs-20240520-arm64.tar.gz"
+          # Ubuntu Base 20.04 ARM64 - Fonte OFICIAL e IMUTÁVEL da Canonical
+          ROOTFS_URL="https://cdimage.ubuntu.com/ubuntu-base/releases/20.04/release/ubuntu-base-20.04.6-base-arm64.tar.gz"
           
-          echo "Baixando base do Ubuntu Touch Core ARM64 de CDN estável..."
-          if ! wget --tries=3 --timeout=30 -q "$ROOTFS_URL" -O rootfs.tar.gz; then
-            echo "::error::Falha ao baixar rootfs. Verifique se a URL do CDN ainda existe."
+          echo "Baixando Ubuntu Base 20.04 ARM64 oficial..."
+          if ! wget --tries=3 --timeout=60 -q "$ROOTFS_URL" -O rootfs.tar.gz; then
+            echo "::error::Falha ao baixar rootfs da Canonical."
             exit 1
           fi
           
-          # Validação básica de arquivo (deve ter pelo menos 200MB)
+          # Validação de integridade (Ubuntu Base ARM64 tem ~30MB)
           FILE_SIZE=$(stat -c%s rootfs.tar.gz)
-          if [ "$FILE_SIZE" -lt 200000000 ]; then
-            echo "::error::Arquivo baixado parece corrompido ou incompleto (${FILE_SIZE} bytes)"
+          if [ "$FILE_SIZE" -lt 25000000 ]; then
+            echo "::error::Arquivo corrompido (${FILE_SIZE} bytes)"
             rm -f rootfs.tar.gz
             exit 1
           fi
@@ -53,7 +53,7 @@ jobs:
           mkdir -p ./rootfs
           sudo tar -xzf rootfs.tar.gz -C ./rootfs
           rm rootfs.tar.gz
-          echo "Rootfs extraído com sucesso. Tamanho: $(du -sh ./rootfs | cut -f1)"
+          echo "Rootfs Ubuntu Base extraído: $(du -sh ./rootfs | cut -f1)"
 
       - name: Gerar Ativos Procedurais (Ícones e Wallpaper)
         run: |
@@ -83,7 +83,6 @@ jobs:
 
       - name: Empacotar Sistema e Gerar ISO Bootável
         run: |
-          # Criar diretório da imagem final
           mkdir -p ./iso-staging/live
           
           # Compactar o rootfs modificado em formato squashfs
@@ -100,8 +99,7 @@ jobs:
           }
           EOF
           
-          # Nota: Em um cenário real de UT, vmlinuz e initrd são extraídos do pacote android-bootimg ou similar.
-          # Para fins de demonstração de empacotamento ISO, criamos placeholders se não existirem.
+          # Placeholders para kernel/initrd (necessários para estrutura ISO válida)
           touch ./iso-staging/boot/vmlinuz ./iso-staging/boot/initrd.img
 
           # Gerar ISO híbrida com xorriso
