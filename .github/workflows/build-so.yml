@@ -1,0 +1,110 @@
+name: Construir WhaleOS ARM64 ISO
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-whaleos:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Clonar Repositório
+        uses: actions/checkout@v4
+
+      - name: Instalar Dependências do Host
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qemu-user-static \
+            binfmt-support \
+            squashfs-tools \
+            xorriso \
+            grub-pc-bin \
+            grub-efi-amd64-bin \
+            mtools \
+            dosfstools \
+            python3-pip \
+            wget ca-certificates
+          
+      - name: Configurar Ambiente Python para Geração de Ativos
+        run: |
+          pip3 install Pillow --break-system-packages
+
+      - name: Baixar Rootfs Base do Ubuntu Touch ARM64
+        run: |
+          # URL oficial do UBports para rootfs minimalista ARM64
+          ROOTFS_URL="https://ci.ubports.com/job/focal-rootfs-arm64/lastSuccessfulBuild/artifact/out/ubports-touch.rootfs.tar.gz"
+          echo "Baixando base do Ubuntu Touch Core ARM64..."
+          wget -q "$ROOTFS_URL" -O rootfs.tar.gz
+          mkdir -p ./rootfs
+          sudo tar -xzf rootfs.tar.gz -C ./rootfs
+          rm rootfs.tar.gz
+          echo "Rootfs extraído com sucesso."
+
+      - name: Gerar Ativos Procedurais (Ícones e Wallpaper)
+        run: |
+          python3 generate_assets.py
+
+      - name: Preparar Ambiente Chroot e Executar Customização
+        run: |
+          # Copiar binário qemu-aarch64-static para dentro do rootfs
+          sudo cp /usr/bin/qemu-aarch64-static ./rootfs/usr/bin/
+          
+          # Garantir que o script de customização e o wallpaper estejam acessíveis
+          sudo cp customize.sh ./rootfs/tmp/customize.sh
+          sudo chmod +x ./rootfs/tmp/customize.sh
+          
+          # Se existir um wallpaper.jpg na raiz do repositório, copiar para o chroot
+          if [ -f "./wallpaper.jpg" ]; then
+            sudo cp ./wallpaper.jpg ./rootfs/tmp/wallpaper.jpg
+          fi
+
+          # Executar o script de customização dentro do chroot ARM64
+          sudo chroot ./rootfs /tmp/customize.sh
+          
+          # Limpeza pós-chroot
+          sudo rm -f ./rootfs/usr/bin/qemu-aarch64-static
+          sudo rm -f ./rootfs/tmp/customize.sh
+          sudo rm -f ./rootfs/tmp/wallpaper.jpg
+
+      - name: Empacotar Sistema e Gerar ISO Bootável
+        run: |
+          # Criar diretório da imagem final
+          mkdir -p ./iso-staging/live
+          
+          # Compactar o rootfs modificado em formato squashfs
+          sudo mksquashfs ./rootfs ./iso-staging/live/filesystem.squashfs -comp xz -e boot dev proc sys tmp run media mnt
+          
+          # Criar estrutura GRUB para boot EFI e Legacy
+          mkdir -p ./iso-staging/boot/grub
+          cat <<EOF > ./iso-staging/boot/grub/grub.cfg
+          set timeout=5
+          set default=0
+          menuentry "WhaleOS ARM64" {
+              linux /boot/vmlinuz root=/dev/ram0 rw quiet splash
+              initrd /boot/initrd.img
+          }
+          EOF
+          
+          # Nota: Em um cenário real de UT, vmlinuz e initrd são extraídos do pacote android-bootimg ou similar.
+          # Para fins de demonstração de empacotamento ISO, criamos placeholders se não existirem.
+          touch ./iso-staging/boot/vmlinuz ./iso-staging/boot/initrd.img
+
+          # Gerar ISO híbrida com xorriso
+          xorriso -as mkisofs \
+            -r -V "WhaleOS" \
+            -b boot/grub/grub.cfg \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            --grub2-boot-info \
+            -o WhaleOS-ARM64.iso \
+            ./iso-staging
+
+      - name: Publicar Artefato da ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhaleOS-ARM64-ISO
+          path: WhaleOS-ARM64.iso
+          retention-days: 7
